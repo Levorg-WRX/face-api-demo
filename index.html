@@ -1,84 +1,79 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>AI顔診断</title>
+  <title>顔診断AI（年齢＋性別＋表情）</title>
   <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
   <style>
-    body { font-family: sans-serif; text-align: center; }
-    canvas { position: absolute; }
-    #result { margin-top: 1em; font-size: 1.2em; }
+    body { text-align: center; font-family: sans-serif; }
+    img, canvas { max-width: 90%; margin-top: 1em; }
+    #result { margin-top: 1em; font-size: 1.2em; white-space: pre-line; }
   </style>
 </head>
 <body>
-  <h1>AI 顔診断（年齢＋性別＋表情）</h1>
+  <h1>📸 顔診断AI</h1>
   <input type="file" id="imageUpload" accept="image/*"><br>
-  <div id="result">🧠 モデル読み込み中...</div>
+  <div id="result">🔄 モデル読み込み中...</div>
   <div style="position: relative; display: inline-block;">
-    <img id="uploadedImage" style="max-width: 90%; display: none;">
+    <img id="uploadedImage" style="display:none;">
     <canvas id="overlay"></canvas>
   </div>
 
   <script>
     const MODEL_URL = './models';
 
-    // JavaScriptエラー捕捉
-    window.onerror = function(msg, src, line, col, err) {
-      console.error("💥 JavaScriptエラー:", msg, "at", src, line + ":" + col);
-      document.getElementById('result').innerText = "⚠️ JavaScript エラー発生: " + msg;
-    };
+    const result = document.getElementById('result');
+    const image = document.getElementById('uploadedImage');
+    const canvas = document.getElementById('overlay');
 
+    // モデル読み込み
     Promise.all([
-      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL).then(() => console.log("✅ 顔検出モデル読み込み完了")),
-      faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL).then(() => console.log("✅ 年齢・性別モデル読み込み完了")),
-      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL).then(() => console.log("✅ 表情モデル読み込み完了"))
-    ]).then(startApp).catch(err => {
+      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+      faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+    ]).then(() => {
+      result.textContent = "📤 画像をアップロードしてください";
+    }).catch(err => {
       console.error("❌ モデル読み込み失敗:", err);
-      document.getElementById('result').innerText = "❌ モデル読み込みに失敗しました。";
+      result.textContent = "❌ モデル読み込みに失敗しました";
     });
 
-    function startApp() {
-      const input = document.getElementById('imageUpload');
-      const result = document.getElementById('result');
-      const image = document.getElementById('uploadedImage');
-      const canvas = document.getElementById('overlay');
+    // ファイル選択時の処理
+    document.getElementById('imageUpload').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
 
-      result.innerText = "📷 画像をアップロードしてください";
+      result.textContent = "🧠 診断中...";
+      image.src = URL.createObjectURL(file);
+      image.style.display = "block";
 
-      input.addEventListener('change', async () => {
-        const file = input.files[0];
-        if (!file) return;
+      image.onload = async () => {
+        canvas.width = image.width;
+        canvas.height = image.height;
 
-        result.innerText = "🧠 診断中...";
-        image.src = URL.createObjectURL(file);
-        image.onload = async () => {
-          canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-          canvas.width = image.width;
-          canvas.height = image.height;
+        const detection = await faceapi
+          .detectSingleFace(image)
+          .withAgeAndGender()
+          .withFaceExpressions();
 
-          const detection = await faceapi
-            .detectSingleFace(image)
-            .withAgeAndGender()
-            .withFaceExpressions();
+        if (!detection) {
+          result.textContent = "😢 顔が検出できませんでした";
+          return;
+        }
 
-          if (!detection) {
-            result.innerText = "😢 顔が検出できませんでした。";
-            return;
-          }
+        const age = detection.age.toFixed(0);
+        const gender = detection.gender === "male" ? "男性っぽい" : "女性っぽい";
+        const expressions = detection.expressions;
+        const topExpression = Object.entries(expressions).sort((a, b) => b[1] - a[1])[0][0];
 
-          const age = detection.age.toFixed(1);
-          const gender = detection.gender;
-          const expressions = detection.expressions;
-          const topExpression = Object.entries(expressions).sort((a, b) => b[1] - a[1])[0][0];
+        result.textContent =
+          `👤 年齢：${age}歳\n` +
+          `⚧ 性別：${gender}\n` +
+          `😊 表情：${topExpression}`;
 
-          result.innerText = `👤 年齢: ${age}歳\n🔻 性別: ${gender === "male" ? "男性っぽい" : "女性っぽい"}\n😊 表情: ${topExpression}`;
-
-          faceapi.draw.drawDetections(canvas, [detection]);
-        };
-        image.style.display = "block";
-      });
-    }
+        faceapi.draw.drawDetections(canvas, [detection]);
+      };
+    });
   </script>
 </body>
 </html>
