@@ -2,77 +2,111 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>🎥 リアルタイム顔診断AI</title>
-  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+  <title>リアルタイム顔診断AI</title>
+  <!-- deferを外し、faceapi読み込みを明示的に先にする -->
+  <script src="https://levorg-wrx.github.io/face-api-host/face-api.min.js"></script>
   <style>
-    body { font-family: sans-serif; text-align: center; }
-    video, canvas { max-width: 100%; border: 1px solid #ccc; }
-    #result { margin-top: 1em; font-size: 1.1em; white-space: pre-line; }
+    body { font-family: sans-serif; text-align: center; margin: 20px; }
+    video, canvas { position: absolute; top: 0; left: 0; }
+    #wrapper { position: relative; display: inline-block; }
+    #result { margin-top: 280px; font-size: 1.2em; white-space: pre-line; }
+    #error { margin-top: 10px; color: red; font-size: 0.9em; }
   </style>
 </head>
 <body>
-  <h1>📷 リアルタイム顔診断</h1>
-  <video id="video" autoplay muted playsinline width="320" height="240"></video>
-  <canvas id="overlay" width="320" height="240"></canvas>
+  <h2>📹 リアルタイム顔診断（年齢・性別・表情）</h2>
+  <div id="wrapper">
+    <video id="video" width="320" height="240" autoplay muted></video>
+    <canvas id="overlay" width="320" height="240"></canvas>
+  </div>
   <div id="result">🔄 モデル読み込み中...</div>
+  <div id="error"></div>
 
   <script>
-    const MODEL_URL = "https://levorg-wrx.github.io/face-api-demo/models";
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('overlay');
-    const result = document.getElementById('result');
+    document.addEventListener("DOMContentLoaded", () => {
+      const MODEL_URL = "https://levorg-wrx.github.io/face-api-host/models";
+      const video = document.getElementById("video");
+      const canvas = document.getElementById("overlay");
+      const result = document.getElementById("result");
+      const errorDiv = document.getElementById("error");
 
-    async function start() {
-      await Promise.all([
-        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-        faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL),
-        faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
-      ]);
-      result.textContent = "📡 カメラ起動中...";
+      async function loadModels() {
+        try {
+          result.textContent = "📦 ssdモデル読み込み中…";
+          await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
-        video.srcObject = stream;
-        video.onloadedmetadata = () => {
-          video.play();
-          result.textContent = "🧠 診断中...";
-          detect();
-        };
-      } catch (err) {
-        result.textContent = "❌ カメラにアクセスできません";
-        console.error(err);
-      }
-    }
+          result.textContent = "📦 年齢・性別モデル読み込み中…";
+          await faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL);
 
-    async function detect() {
-      const displaySize = { width: video.width, height: video.height };
-      faceapi.matchDimensions(canvas, displaySize);
+          result.textContent = "📦 表情モデル読み込み中…";
+          await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
 
-      setInterval(async () => {
-        const detections = await faceapi
-          .detectSingleFace(video)
-          .withAgeAndGender()
-          .withFaceExpressions();
-
-        const resizedDetections = faceapi.resizeResults(detections, displaySize);
-        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-
-        if (detections) {
-          faceapi.draw.drawDetections(canvas, resizedDetections);
-
-          const age = detections.age.toFixed(0);
-          const gender = detections.gender === 'male' ? '男性' : '女性';
-          const expressions = detections.expressions;
-          const topExpression = Object.entries(expressions).sort((a, b) => b[1] - a[1])[0][0];
-
-          result.textContent = `🧑‍🔬 年齢: ${age}歳\n🚻 性別: ${gender}\n😊 表情: ${topExpression}`;
-        } else {
-          result.textContent = "😐 顔が検出されません";
+          result.textContent = "📸 カメラ起動中...";
+        } catch (e) {
+          result.textContent = "❌ モデル読み込みに失敗しました";
+          errorDiv.textContent = e.message || e;
+          throw e;
         }
-      }, 1500);
-    }
+      }
 
-    start();
+      async function setupCamera() {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+          video.srcObject = stream;
+        } catch (e) {
+          result.textContent = "❌ カメラにアクセスできません";
+          errorDiv.textContent = e.message || e;
+          throw e;
+        }
+      }
+
+      function startDetection() {
+        const displaySize = { width: video.width, height: video.height };
+        faceapi.matchDimensions(canvas, displaySize);
+
+        setInterval(async () => {
+          try {
+            const detection = await faceapi
+              .detectSingleFace(video)
+              .withAgeAndGender()
+              .withFaceExpressions();
+
+            const ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (detection) {
+              const resized = faceapi.resizeResults(detection, displaySize);
+              faceapi.draw.drawDetections(canvas, resized);
+
+              const age = Math.round(detection.age);
+              const gender = detection.gender === "male" ? "男性" : "女性";
+              const topExp = Object.entries(detection.expressions).sort((a, b) => b[1] - a[1])[0][0];
+
+              result.textContent = `👤 年齢：${age}歳\n⚧ 性別：${gender}\n😊 表情：${topExp}`;
+            } else {
+              result.textContent = "😐 顔が検出されません";
+            }
+          } catch (e) {
+            errorDiv.textContent = "診断エラー: " + (e.message || e);
+          }
+        }, 1500);
+      }
+
+      // 実行
+      (async () => {
+        try {
+          await loadModels();
+          await setupCamera();
+
+          video.addEventListener("playing", () => {
+            result.textContent = "🧠 診断中...";
+            startDetection();
+          });
+        } catch (e) {
+          console.error("初期化エラー:", e);
+        }
+      })();
+    });
   </script>
 </body>
 </html>
