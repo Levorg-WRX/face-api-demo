@@ -1,85 +1,79 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>顔診断AI（年齢・性別・表情）</title>
+  <meta charset="UTF-8" />
+  <title>リアルタイム顔診断AI</title>
   <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
   <style>
-    body { font-family: sans-serif; text-align: center; padding: 1em; }
-    img, canvas { max-width: 90%; margin-top: 1em; }
-    #result { margin-top: 1em; font-size: 1.2em; white-space: pre-line; }
+    body { font-family: sans-serif; text-align: center; margin: 20px; }
+    video, canvas { position: absolute; top: 0; left: 0; }
+    #wrapper { position: relative; display: inline-block; }
+    #result { margin-top: 280px; font-size: 1.2em; white-space: pre-line; }
   </style>
 </head>
 <body>
-  <h1>📸 顔診断AI</h1>
-  <input type="file" id="imageUpload" accept="image/*"><br>
-  <div id="result">🔄 モデル読み込み中...</div>
-  <div style="position: relative; display: inline-block;">
-    <img id="uploadedImage" style="display:none;">
-    <canvas id="overlay"></canvas>
+  <h2>📹 リアルタイム顔診断（年齢・性別・表情）</h2>
+  <div id="wrapper">
+    <video id="video" width="320" height="240" autoplay muted></video>
+    <canvas id="overlay" width="320" height="240"></canvas>
   </div>
+  <div id="result">🔄 モデル読み込み中...</div>
 
   <script>
-    const MODEL_URL = 'https://cdn.jsdelivr.net/gh/Levorg-WRX/face-api-demo@main/models';
-    const result = document.getElementById('result');
-    const image = document.getElementById('uploadedImage');
-    const canvas = document.getElementById('overlay');
+    const MODEL_URL = "https://levorg-wrx.github.io/face-api-host/models";
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("overlay");
+    const result = document.getElementById("result");
 
-    const log = (msg) => {
-      console.log(msg);
-      result.textContent = msg;
-    };
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+        video.srcObject = stream;
+      } catch (err) {
+        result.textContent = "❌ カメラへのアクセスが拒否されました";
+        console.error(err);
+      }
+    }
 
-    Promise.all([
-      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-      faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
-    ])
-    .then(() => {
-      log("📤 画像をアップロードしてください");
-    })
-    .catch(err => {
-      log("❌ モデル読み込みに失敗しました");
-      console.error("モデル読み込みエラー:", err);
-    });
+    async function loadModels() {
+      await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+      await faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+      result.textContent = "📷 カメラに顔を映してください...";
+    }
 
-    document.getElementById('imageUpload').addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
+    video.addEventListener("play", () => {
+      const displaySize = { width: video.width, height: video.height };
+      faceapi.matchDimensions(canvas, displaySize);
 
-      log("🧠 診断中...");
-      image.src = URL.createObjectURL(file);
-      image.style.display = "block";
+      setInterval(async () => {
+        const detection = await faceapi
+          .detectSingleFace(video)
+          .withAgeAndGender()
+          .withFaceExpressions();
 
-      image.onload = async () => {
-        canvas.width = image.width;
-        canvas.height = image.height;
-
-        try {
-          const detection = await faceapi
-            .detectSingleFace(image)
-            .withAgeAndGender()
-            .withFaceExpressions();
-
-          if (!detection) {
-            log("😢 顔が検出できませんでした");
-            return;
-          }
+        if (detection) {
+          const resizedDetections = faceapi.resizeResults(detection, displaySize);
+          canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+          faceapi.draw.drawDetections(canvas, resizedDetections);
 
           const age = detection.age.toFixed(0);
           const gender = detection.gender === "male" ? "男性っぽい" : "女性っぽい";
-          const expressions = detection.expressions;
-          const topExpression = Object.entries(expressions).sort((a, b) => b[1] - a[1])[0][0];
+          const exp = Object.entries(detection.expressions).sort((a, b) => b[1] - a[1])[0][0];
 
-          log(`👤 年齢：${age}歳\n⚧ 性別：${gender}\n😊 表情：${topExpression}`);
-
-          faceapi.draw.drawDetections(canvas, [detection]);
-        } catch (err) {
-          log("⚠️ 診断中にエラーが発生しました");
-          console.error("診断エラー:", err);
+          result.textContent = `👤 年齢：${age}歳\n⚧ 性別：${gender}\n😊 表情：${exp}`;
+        } else {
+          result.textContent = "👀 顔が見つかりません";
+          canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
         }
-      };
+      }, 1000);
     });
+
+    // 起動
+    Promise.all([
+      loadModels(),
+      setupCamera()
+    ]);
   </script>
 </body>
 </html>
